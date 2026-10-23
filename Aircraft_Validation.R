@@ -358,8 +358,7 @@ atl_connections <- sequence[
     !is.na(ArrDelay) & !is.na(next_DepDelay) &
     scheduled_turnaround >= 30 &
     scheduled_turnaround <= 360 &
-    actual_turnaround >= 0 &
-    actual_turnaround <= 720
+    actual_turnaround >= 0 
 ]
 
 cat("\nRecords involved in tied aircraft departure times:",
@@ -446,3 +445,384 @@ print(head(atl_connections[
     scheduled_turnaround, actual_turnaround
   )
 ]))
+
+
+
+
+
+
+# Check for aircraft whose observed departure history is incomplete.
+incomplete_aircraft <- unique(sequence[
+  Cancelled == 0 & is.na(DepDelay),
+  Tail_Number
+])
+
+atl_connections[, incomplete_departure_history :=
+                  Tail_Number %in% incomplete_aircraft]
+
+cat("\nOperated records missing departure delay:",
+    sequence[Cancelled == 0 & is.na(DepDelay), .N], "\n")
+
+cat("Agreeing Atlanta pairs on affected aircraft:",
+    atl_connections[
+      same_next_flight == TRUE &
+        incomplete_departure_history == TRUE,
+      .N
+    ], "\n")
+
+# Preserve the connections passing both ordering checks.
+checked_connections <- copy(atl_connections[
+  same_next_flight == TRUE &
+    actual_order_unambiguous == TRUE
+])
+
+cat("Working connections after order checks:",
+    nrow(checked_connections), "\n")
+
+# Inspect nearby operations for each of the four disagreements.
+disagreements <- atl_connections[same_next_flight == FALSE]
+
+for (j in seq_len(nrow(disagreements))) {
+  aircraft_id <- disagreements$Tail_Number[j]
+  reference_time <- disagreements$scheduled_dep_utc[j]
+
+  cat("\nNearby operations for aircraft:", aircraft_id, "\n")
+
+  print(sequence[
+    Tail_Number == aircraft_id &
+      abs(as.numeric(difftime(
+        scheduled_dep_utc, reference_time, units = "hours"
+      ))) <= 12,
+    .(
+      record_id, Origin, Dest,
+      scheduled_dep_utc, DepDelay, ArrDelay,
+      Cancelled, Diverted, arrival_clock_ok
+    )
+  ])
+}
+
+
+
+
+
+
+# Preliminary recovery analysis among late incoming flights.
+late_connections <- copy(
+  checked_connections[ArrDelay >= 15]
+)
+
+late_connections[, recovered := next_DepDelay < 15]
+
+cat("\nChecked connections:", nrow(checked_connections), "\n")
+cat("Connections with incoming arrival delay >= 15 minutes:",
+    nrow(late_connections), "\n")
+
+print(late_connections[, .(
+  connections = .N
+), by = recovered][order(recovered)])
+
+if (nrow(late_connections) > 0) {
+  cat("Preliminary recovery percentage:",
+      round(100 * mean(late_connections$recovered), 2),
+      "%\n")
+}
+
+# Save outside the Git repository.
+checkpoint_path <- path.expand(
+  "~/Downloads/Atlanta_Connections_Jan2019_Checkpoint.rds"
+)
+
+saveRDS(
+  list(
+    checked_connections = checked_connections,
+    late_connections = late_connections,
+    disagreements = disagreements
+  ),
+  checkpoint_path
+)
+
+cat("Checkpoint saved to:", checkpoint_path, "\n")
+
+
+
+
+
+
+
+# Descriptive comparison using predefined turnaround groups.
+late_connections[, turnaround_group := cut(
+  scheduled_turnaround,
+  breaks = c(30, 60, 90, 120, 180, 360),
+  right = FALSE,
+  include.lowest = TRUE,
+  labels = c(
+    "30–<60 min",
+    "60–<90 min",
+    "90–<120 min",
+    "120–<180 min",
+    "180–360 min"
+  )
+)]
+
+turnaround_summary <- late_connections[, .(
+  connections = .N,
+  recovered = sum(recovered),
+  recovery_percent = round(100 * mean(recovered), 2)
+), by = turnaround_group][order(turnaround_group)]
+
+cat("\nRecovery by scheduled turnaround:\n")
+print(turnaround_summary)
+
+stopifnot(
+  !anyNA(late_connections$turnaround_group),
+  sum(turnaround_summary$connections) == nrow(late_connections)
+)
+
+
+
+
+
+
+late_connections[, incoming_delay_group := cut(
+  ArrDelay,
+  breaks = c(15, 30, 60, 120, Inf),
+  right = FALSE,
+  labels = c(
+    "15–<30 min", "30–<60 min",
+    "60–<120 min", "120+ min"
+  )
+)]
+
+recovery_by_delay <- late_connections[, .(
+  connections = .N,
+  recovered = sum(recovered),
+  recovery_percent = round(100 * mean(recovered), 2)
+), by = .(
+  incoming_delay_group, turnaround_group
+)][order(incoming_delay_group, turnaround_group)]
+
+cat("\nRecovery by incoming delay and turnaround:\n")
+print(recovery_by_delay, nrows = 30)
+
+
+
+
+
+
+# Proposed prediction time: incoming aircraft's actual arrival.
+late_connections[, prediction_time_utc :=
+                   scheduled_arr_utc + ArrDelay * 60]
+
+late_connections[, minutes_to_scheduled_departure :=
+                   scheduled_turnaround - ArrDelay]
+
+cat("\nTime remaining at incoming arrival:\n")
+print(late_connections[, .(
+  connections = .N,
+  recovered = sum(recovered),
+  recovery_percent = round(100 * mean(recovered), 2)
+), by = .(
+  scheduled_departure_passed =
+    minutes_to_scheduled_departure < 0
+)])
+
+cat("\nRange of minutes until scheduled departure:\n")
+print(range(late_connections$minutes_to_scheduled_departure))
+
+
+
+
+
+
+
+# Main prediction cohort:
+# incoming flight is late, but next scheduled departure is still ahead.
+model_cohort <- copy(late_connections[
+  minutes_to_scheduled_departure > 0 &
+    actual_turnaround > 0
+])
+
+cat("\nMain prediction cohort:", nrow(model_cohort), "\n")
+
+print(model_cohort[, .(
+  connections = .N,
+  recovery_percent = round(100 * mean(recovered), 2)
+), by = recovered])
+
+cat("Arrivals exactly at next scheduled departure:",
+    late_connections[
+      minutes_to_scheduled_departure == 0, .N
+    ], "\n")
+
+cat("Connections with zero actual turnaround:",
+    late_connections[actual_turnaround == 0, .N], "\n")
+
+# Preserve the earlier checkpoint and save this cohort separately.
+saveRDS(
+  model_cohort,
+  path.expand("~/Downloads/Atlanta_Recovery_Cohort_Jan2019.rds")
+)
+
+
+
+
+# Export Atlanta's full scheduled activity.
+# Include cancelled/diverted flights because we are measuring
+# scheduled activity, not the flights that ultimately operated.
+
+atl_schedule <- rbindlist(list(
+  flights[
+    Origin == "ATL" & !is.na(scheduled_dep_utc),
+    .(
+      record_id,
+      movement = "departure",
+      scheduled_time_utc = scheduled_dep_utc
+    )
+  ],
+  flights[
+    Dest == "ATL" & !is.na(scheduled_arr_utc),
+    .(
+      record_id,
+      movement = "arrival",
+      scheduled_time_utc = scheduled_arr_utc
+    )
+  ]
+))
+
+setorder(atl_schedule, scheduled_time_utc)
+
+cat("\nAtlanta scheduled movements:\n")
+print(atl_schedule[, .N, by = movement])
+
+cat("\nSchedule timestamp range:\n")
+print(range(atl_schedule$scheduled_time_utc))
+
+schedule_path <- path.expand(
+  "~/Downloads/Atlanta_Schedule_Jan2019.rds"
+)
+
+saveRDS(atl_schedule, schedule_path)
+
+cat("\nAtlanta schedule saved to:", schedule_path, "\n")
+
+
+
+
+
+# AUDIT: begin with schedule-linked candidates and incoming information.
+# Do not filter on the outgoing flight's operational outcome yet.
+audit <- copy(sequence[
+  Dest == "ATL" &
+    airport_continuity == TRUE &
+    departure_tie == FALSE &
+    next_departure_tie == FALSE &
+    Cancelled == 0 &
+    Diverted == 0 &
+    arrival_clock_ok == TRUE &
+    !is.na(ArrDelay) &
+    ArrDelay >= 15 &
+    scheduled_turnaround >= 30 &
+    scheduled_turnaround <= 360 &
+    scheduled_turnaround - ArrDelay > 0
+])
+
+# Record each retrospective condition separately.
+audit[, outgoing_operated_normally :=
+  !is.na(next_Cancelled) & next_Cancelled == 0 &
+  !is.na(next_Diverted) & next_Diverted == 0
+]
+
+audit[, outgoing_delay_known := !is.na(next_DepDelay)]
+
+audit[, outgoing_schedule_consistent :=
+  !is.na(next_arrival_clock_ok) & next_arrival_clock_ok
+]
+
+audit[, actual_turnaround_pass :=
+  !is.na(actual_turnaround) &
+  actual_turnaround > 0
+]
+
+# Attach actual-order checks to this broader candidate set.
+audit_index <- match(audit$record_id, actual_order$record_id)
+
+audit[, actual_order_pass :=
+  !is.na(actual_order$actual_next_id[audit_index]) &
+  actual_order$actual_next_id[audit_index] == next_record_id &
+  !is.na(actual_order$actual_departure_tie[audit_index]) &
+  !actual_order$actual_departure_tie[audit_index] &
+  !is.na(actual_order$actual_next_tie[audit_index]) &
+  !actual_order$actual_next_tie[audit_index]
+]
+
+# Show cumulative exclusions in a documented order.
+audit_conditions <- c(
+  "outgoing_operated_normally",
+  "outgoing_delay_known",
+  "outgoing_schedule_consistent",
+  "actual_turnaround_pass",
+  "actual_order_pass"
+)
+
+remaining <- rep(TRUE, nrow(audit))
+
+audit_counts <- data.table(
+  step = "Schedule-linked late arrivals with departure still ahead",
+  remaining = nrow(audit),
+  excluded_at_step = 0L
+)
+
+for (condition in audit_conditions) {
+  previous_count <- sum(remaining)
+  remaining <- remaining & (audit[[condition]] %in% TRUE)
+
+  audit_counts <- rbind(
+    audit_counts,
+    data.table(
+      step = condition,
+      remaining = sum(remaining),
+      excluded_at_step = previous_count - sum(remaining)
+    )
+  )
+}
+
+cat("\nCOHORT FILTER AUDIT:\n")
+print(audit_counts)
+
+# Confirm that this audit reproduces the existing model cohort.
+stopifnot(
+  setequal(
+    audit$record_id[remaining],
+    model_cohort$record_id
+  )
+)
+
+cat("\nAudit reproduces the existing model cohort.\n")
+
+saveRDS(
+  list(candidates = audit, filter_counts = audit_counts),
+  path.expand("~/Downloads/Atlanta_Cohort_FilterAudit_Jan2019.rds")
+)
+
+
+
+
+
+cat("\nCases excluded by actual-turnaround limits:\n")
+
+print(audit[
+  outgoing_operated_normally == TRUE &
+    outgoing_delay_known == TRUE &
+    outgoing_schedule_consistent == TRUE &
+    actual_turnaround_pass == FALSE,
+  .(
+    record_id,
+    next_record_id,
+    Tail_Number,
+    ArrDelay,
+    next_DepDelay,
+    scheduled_turnaround,
+    actual_turnaround,
+    actual_order_pass
+  )
+])
