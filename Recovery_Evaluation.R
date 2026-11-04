@@ -90,3 +90,71 @@ saveRDS(
 )
 
 cat("\nPilot test results saved.\n")
+
+
+
+
+
+# Compare predicted and observed recovery within probability ranges.
+results[, probability_bin := cut(
+  probability,
+  breaks = seq(0, 1, by = 0.2),
+  include.lowest = TRUE
+)]
+
+reliability <- results[
+  model != "constant_reference",
+  .(
+    connections = .N,
+    mean_prediction = mean(probability),
+    observed_recovery = mean(recovered)
+  ),
+  by = .(model, probability_bin)
+][order(model, probability_bin)]
+
+cat("\nTEST RELIABILITY TABLE:\n")
+print(reliability, nrows = 30)
+
+
+
+
+
+
+plot_path <- path.expand("~/Downloads/Atlanta_Reliability_Jan2019.png")
+
+png(plot_path, width = 1500, height = 750, res = 150)
+par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3, 1))
+
+for (prefix in c("baseline", "expanded")) {
+  plot(
+    NA_real_, NA_real_,
+    xlim = c(0, 1), ylim = c(0, 1), asp = 1,
+    xlab = "Mean predicted recovery probability",
+    ylab = "Observed recovery rate",
+    main = if (prefix == "baseline") "Baseline" else "Weather + traffic"
+  )
+  abline(0, 1, lty = 2, col = "gray60")
+
+  styles <- c("raw", "calibrated")
+  colors <- c("#1565A8", "#B34826")
+  symbols <- c(16, 17)
+
+  for (i in seq_along(styles)) {
+    model_name <- paste(prefix, styles[i], sep = "_")
+    bins <- reliability[model == model_name]
+
+    points(
+      bins$mean_prediction, bins$observed_recovery,
+      pch = symbols[i], col = colors[i],
+      cex = 0.7 + sqrt(bins$connections) / 10
+    )
+  }
+
+  legend(
+    "topleft", c("Original", "Recalibrated"),
+    col = colors, pch = symbols, bty = "n"
+  )
+}
+
+invisible(dev.off())
+cat("\nReliability plot saved to:", plot_path, "\n")
