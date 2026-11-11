@@ -1,0 +1,7 @@
+airport,obs,pct_missing_temp,pct_missing_wind,pct_missing_vis,pct_LIFR_IFR
+ATL,42570,0,0,0.3,14.3
+ORD,44340,0,0,0,12.9
+DEN,41580,0.1,0.3,0.1,12.3
+SFO,39751,0,0,0,7.9
+JFK,40342,0,0,0.1,12.9
+SEA,45446,0,0.2,0.1,13.6

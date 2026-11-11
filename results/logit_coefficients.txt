@@ -1,0 +1,58 @@
+
+==== baseline_logit ====
+
+Call:
+glm(formula = fm(base_x), family = binomial(), data = tr)
+
+Coefficients:
+            Estimate Std. Error  z value Pr(>|z|)    
+(Intercept) -1.56511    0.01616  -96.834  < 2e-16 ***
+airportDEN   0.20977    0.01743   12.033  < 2e-16 ***
+airportJFK  -0.18669    0.02658   -7.024 2.16e-12 ***
+airportORD   0.63486    0.01604   39.589  < 2e-16 ***
+airportSEA   0.11204    0.01965    5.702 1.19e-08 ***
+airportSFO   0.23015    0.01974   11.661  < 2e-16 ***
+arr_delay_h -2.64910    0.01497 -176.958  < 2e-16 ***
+turn_h       2.25535    0.01242  181.556  < 2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+(Dispersion parameter for binomial family taken to be 1)
+
+    Null deviance: 292326  on 218647  degrees of freedom
+Residual deviance: 198687  on 218640  degrees of freedom
+AIC: 198703
+
+Number of Fisher Scoring iterations: 7
+
+
+==== expanded_logit ====
+
+Call:
+glm(formula = fm(full_x), family = binomial(), data = tr)
+
+Coefficients:
+              Estimate Std. Error  z value Pr(>|z|)    
+(Intercept) -2.3113553  0.0376811  -61.340  < 2e-16 ***
+airportDEN   0.1532390  0.0182017    8.419  < 2e-16 ***
+airportJFK  -0.2144696  0.0272557   -7.869 3.58e-15 ***
+airportORD   0.5840809  0.0168726   34.617  < 2e-16 ***
+airportSEA   0.0410121  0.0201266    2.038   0.0416 *  
+airportSFO   0.1854945  0.0202368    9.166  < 2e-16 ***
+arr_delay_h -2.6282834  0.0150500 -174.637  < 2e-16 ***
+turn_h       2.2597151  0.0124670  181.256  < 2e-16 ***
+tmp_c       -0.0071741  0.0005622  -12.761  < 2e-16 ***
+wnd_ms      -0.0260607  0.0022951  -11.355  < 2e-16 ***
+vis_km       0.0284940  0.0015316   18.604  < 2e-16 ***
+traffic_rel  0.5733680  0.0241929   23.700  < 2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+(Dispersion parameter for binomial family taken to be 1)
+
+    Null deviance: 292326  on 218647  degrees of freedom
+Residual deviance: 197636  on 218636  degrees of freedom
+AIC: 197660
+
+Number of Fisher Scoring iterations: 7
+
